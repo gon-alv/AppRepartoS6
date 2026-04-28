@@ -1,5 +1,6 @@
 package com.gonalv.apprepartos6
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
