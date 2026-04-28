@@ -17,6 +17,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +57,24 @@ class MenuActivity : ComponentActivity() {
 fun LocationViewer(fusedLocationClient: FusedLocationProviderClient, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var locationInfo by remember { mutableStateOf("Ubicación desconocida") }
+    var hasPermission by remember {
+        mutableStateOf(
+            ActivityCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        hasPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (!hasPermission) {
+            Toast.makeText(context, "Permiso denegado por el usuario", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Column(
         modifier = modifier.fillMaxSize(),
@@ -64,11 +85,20 @@ fun LocationViewer(fusedLocationClient: FusedLocationProviderClient, modifier: M
         Text(text = locationInfo, modifier = Modifier.padding(16.dp))
 
         Button(onClick = {
-            obtenerUbicacion(context, fusedLocationClient) { location ->
-                locationInfo = "Lat: ${location.latitude}, Lon: ${location.longitude}"
+            if (hasPermission) {
+                obtenerUbicacion(context, fusedLocationClient) { location ->
+                    locationInfo = "Lat: ${location.latitude}, Lon: ${location.longitude}"
+                }
+            } else {
+                permissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                )
             }
         }) {
-            Text("Obtener Ubicacion")
+            Text(if (hasPermission) "Obtener Ubicacion" else "Conceder Permisos")
         }
     }
 }
