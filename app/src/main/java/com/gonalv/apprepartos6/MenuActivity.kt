@@ -19,7 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.runtime.LaunchedEffect
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +34,9 @@ import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.FirebaseDatabase
+//import com.google.firebase.auth.FirebaseAuth
 
 class MenuActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,6 +55,13 @@ class MenuActivity : ComponentActivity() {
         }
     }
 }
+
+//Se define una data class para almacenar la informacion geografica del usuario
+data class UbicacionUsuario(
+    val latitud: Double = 0.0,
+    val longitud: Double = 0.0,
+    val timestamp: Long = System.currentTimeMillis()
+)
 
 @Composable
 fun LocationViewer(fusedLocationClient: FusedLocationProviderClient, modifier: Modifier = Modifier) {
@@ -88,6 +98,12 @@ fun LocationViewer(fusedLocationClient: FusedLocationProviderClient, modifier: M
             if (hasPermission) {
                 obtenerUbicacion(context, fusedLocationClient) { location ->
                     locationInfo = "Lat: ${location.latitude}, Lon: ${location.longitude}"
+                    val usuario = FirebaseAuth.getInstance().currentUser
+                    if (usuario != null) {
+                        guardarGPS(userId = usuario.uid, lat = location.latitude, lon = location.longitude)
+                    } else {
+                        Toast.makeText(context, "Error: Usuario no autenticado", Toast.LENGTH_SHORT).show()
+                    }
                 }
             } else {
                 permissionLauncher.launch(
@@ -116,7 +132,7 @@ fun obtenerUbicacion(
             Manifest.permission.ACCESS_COARSE_LOCATION
         ) != PackageManager.PERMISSION_GRANTED
     ) {
-        Toast.makeText(context, "Permiso de ubicación no concedido", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "No se ha concedido permiso de ubicación", Toast.LENGTH_SHORT).show()
         return
     }
 
@@ -134,3 +150,19 @@ fun obtenerUbicacion(
         Toast.makeText(context, "Error: ${exception.message}", Toast.LENGTH_SHORT).show()
     }
 }
+
+fun guardarGPS(userId: String, lat: Double, lon: Double) {
+    val database = FirebaseDatabase.getInstance(
+        "https://login-semana-6-f42a1-default-rtdb.firebaseio.com/"
+    ).reference
+    val ubicacion = UbicacionUsuario(lat, lon)
+
+    database.child("ubicaciones").child(userId).setValue(ubicacion).addOnSuccessListener {
+        println("Ubicación almacenada exitosamente")
+    }
+        .addOnFailureListener {
+            println("Error al guardar ubicación: ${it.message}")
+        }
+}
+
+

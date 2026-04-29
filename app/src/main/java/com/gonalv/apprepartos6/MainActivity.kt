@@ -91,8 +91,6 @@ fun LoginScreen(modifier: Modifier = Modifier) {
                         .addOnCompleteListener { task ->
                             if (task.isSuccessful) {
                                 val intent = Intent(context, MenuActivity::class.java)
-                                intent.putExtra("EMAIL", email)
-                                context.startActivity(intent)
                                 intent.flags
                                 intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
                                 context.startActivity(intent)
