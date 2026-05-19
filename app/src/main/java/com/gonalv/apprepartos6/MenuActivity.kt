@@ -17,7 +17,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,6 +29,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Surface
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,13 +51,26 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import com.google.maps.android.compose.GoogleMap
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.ui.graphics.Color
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.maps.android.compose.Circle
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.rememberMarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
+import com.google.android.gms.maps.CameraUpdateFactory
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 //import com.google.firebase.auth.FirebaseAuth
 
 class MenuActivity : ComponentActivity() {
@@ -79,6 +100,10 @@ fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
     var montoCompraStr by remember { mutableStateOf("") }
     var resultInfo by remember { mutableStateOf("") }
     var currentUserLocation by remember { mutableStateOf<LatLng?>(null) }
+
+    val latCentro = -41.53594865890991
+    val lonCentro = -73.07477927290162
+    val centroDistribucion = LatLng(latCentro, lonCentro)
 
     var hasPermission by remember {
         mutableStateOf(
@@ -113,8 +138,20 @@ fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(title = { Text("App Reparto S6") })
+            TopAppBar(
+                title = { 
+                    Text(
+                        "Calculo de Despacho",
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontWeight = FontWeight.Bold
+                    ) 
+                },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            )
         }
     ) { innerPadding ->
         Column(
@@ -124,17 +161,23 @@ fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Mapa
             val cameraPositionState = rememberCameraPositionState {
                 position = CameraPosition.fromLatLngZoom(
-                    currentUserLocation ?: LatLng(-41.4689, -72.9411),
+                    centroDistribucion,
                     12f
                 )
             }
 
             LaunchedEffect(currentUserLocation) {
-                currentUserLocation?.let {
-                    cameraPositionState.position = CameraPosition.fromLatLngZoom(it, 15f)
+                currentUserLocation?.let { userLoc ->
+                    val bounds = LatLngBounds.builder()
+                        .include(centroDistribucion)
+                        .include(userLoc)
+                        .build()
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newLatLngBounds(bounds, 100),
+                        1000
+                    )
                 }
             }
 
@@ -145,12 +188,51 @@ fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
             ) {
                 GoogleMap(
                     modifier = Modifier.fillMaxSize(),
-                    cameraPositionState = cameraPositionState
+                    cameraPositionState = cameraPositionState,
+                    properties = MapProperties(isMyLocationEnabled = hasPermission),
+                    uiSettings = MapUiSettings(myLocationButtonEnabled = false)
                 ) {
+                    // Marcador Centro de Distribución
+                    Marker(
+                        state = rememberMarkerState(position = centroDistribucion),
+                        title = "Centro de Distribución",
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+                    )
+
                     currentUserLocation?.let {
-                        Marker(
-                            state = rememberMarkerState(position = it),
-                            title = "Tu ubicación"
+                        // Círculo azul para ubicación actual
+                        Circle(
+                            center = it,
+                            radius = 100.0, // Radio en metros
+                            fillColor = Color(0x330000FF),
+                            strokeColor = Color.Blue,
+                            strokeWidth = 2f
+                        )
+                    }
+                }
+
+                // Botón para re-centrar (estilo estándar de mapa)
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 16.dp, end = 16.dp)
+                        .size(40.dp)
+                        .shadow(elevation = 4.dp, shape = CircleShape),
+                    shape = CircleShape,
+                    color = Color.White
+                ) {
+                    IconButton(
+                        onClick = {
+                            obtenerUbicacion(context, fusedLocationClient) { location ->
+                                val newLatLng = LatLng(location.latitude, location.longitude)
+                                currentUserLocation = newLatLng
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MyLocation,
+                            contentDescription = "Mi ubicación",
+                            tint = Color(0xFF666666) // Color gris estándar de iconos de Google Maps
                         )
                     }
                 }
@@ -158,15 +240,16 @@ fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            TextField(
+            OutlinedTextField(
                 value = montoCompraStr,
                 onValueChange = { montoCompraStr = it },
                 label = { Text("Total Compra") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = {
@@ -198,14 +281,29 @@ fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
                         Toast.makeText(context, "Ingrese un monto válido y active el GPS", Toast.LENGTH_SHORT).show()
                     }
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
             ) {
-                Text("Calcular Tarifa")
+                Text("Calcular Tarifa", fontWeight = FontWeight.Bold)
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text(text = resultInfo)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    text = resultInfo,
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
