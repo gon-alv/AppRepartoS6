@@ -46,9 +46,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import com.gonalv.apprepartos6.ui.theme.AppRepartoS6Theme
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
+import android.app.Activity
+import android.content.IntentSender
+import androidx.activity.result.IntentSenderRequest
+import com.google.android.gms.common.api.ResolvableApiException
+import com.google.android.gms.location.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
@@ -71,7 +76,6 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.android.gms.maps.CameraUpdateFactory
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
-//import com.google.firebase.auth.FirebaseAuth
 
 class MenuActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -97,10 +101,76 @@ data class UbicacionUsuario(
 @Composable
 fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+   // Se inicializan las variables a utilizar en el programa
     var montoCompraStr by remember { mutableStateOf("") }
     var resultInfo by remember { mutableStateOf("") }
     var currentUserLocation by remember { mutableStateOf<LatLng?>(null) }
+    var isLocating by remember { mutableStateOf(false) }
+    var pendingIntentSender by remember { mutableStateOf<IntentSenderRequest?>(null) }
 
+    fun obtenerUbicacion() {
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10000).build()
+        val builder = LocationSettingsRequest.Builder().addLocationRequest(locationRequest)
+        val client: SettingsClient = LocationServices.getSettingsClient(context)
+        val task = client.checkLocationSettings(builder.build())
+
+        isLocating = true
+        task.addOnSuccessListener {
+            val cancellationTokenSource = CancellationTokenSource()
+            fusedLocationClient.getCurrentLocation(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                cancellationTokenSource.token
+            ).addOnSuccessListener { location ->
+                isLocating = false
+                if (location != null) {
+                    currentUserLocation = LatLng(location.latitude, location.longitude)
+                } else {
+                    scope.launch { snackbarHostState.showSnackbar("No se pudo obtener la ubicación") }
+                }
+            }.addOnFailureListener {
+                isLocating = false
+                scope.launch { snackbarHostState.showSnackbar("Error: ${it.message}") }
+            }
+        }
+
+        task.addOnFailureListener { exception ->
+            isLocating = false
+            if (exception is ResolvableApiException) {
+                try {
+                    pendingIntentSender = IntentSenderRequest.Builder(exception.resolution.intentSender).build()
+                } catch (_: IntentSender.SendIntentException) { }
+            } else {
+                scope.launch { snackbarHostState.showSnackbar("Asegúrese de tener el GPS habilitado") }
+            }
+        }
+    }
+
+    val settingResultRequest = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { activityResult ->
+        if (activityResult.resultCode == Activity.RESULT_OK) {
+            obtenerUbicacion()
+        } else {
+            scope.launch {
+                snackbarHostState.showSnackbar("El GPS es necesario para calcular el envío")
+            }
+        }
+    }
+
+    LaunchedEffect(pendingIntentSender) {
+        pendingIntentSender?.let {
+            settingResultRequest.launch(it)
+            pendingIntentSender = null
+        }
+    }
+    // Se utilizará una ubicación arbitraria para probar la funcionalidad
     val latCentro = -41.53594865890991
     val lonCentro = -73.07477927290162
     val centroDistribucion = LatLng(latCentro, lonCentro)
@@ -123,9 +193,7 @@ fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
 
     LaunchedEffect(hasPermission) {
         if (hasPermission) {
-            obtenerUbicacion(context, fusedLocationClient) { location ->
-                currentUserLocation = LatLng(location.latitude, location.longitude)
-            }
+            obtenerUbicacion()
         } else {
             permissionLauncher.launch(
                 arrayOf(
@@ -139,6 +207,7 @@ fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { 
@@ -148,7 +217,7 @@ fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
                         fontWeight = FontWeight.Bold
                     ) 
                 },
-                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary
                 )
             )
@@ -211,7 +280,7 @@ fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
                     }
                 }
 
-                // Botón para re-centrar (estilo estándar de mapa)
+                // Se incorpora también un botón para centrar la ubicación
                 Surface(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
@@ -223,17 +292,23 @@ fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
                 ) {
                     IconButton(
                         onClick = {
-                            obtenerUbicacion(context, fusedLocationClient) { location ->
-                                val newLatLng = LatLng(location.latitude, location.longitude)
-                                currentUserLocation = newLatLng
-                            }
-                        }
+                            obtenerUbicacion()
+                        },
+                        enabled = !isLocating
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.MyLocation,
-                            contentDescription = "Mi ubicación",
-                            tint = Color(0xFF666666) // Color gris estándar de iconos de Google Maps
-                        )
+                        if (isLocating) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.MyLocation,
+                                contentDescription = "Mi ubicación",
+                                tint = Color(0xFF666666)
+                            )
+                        }
                     }
                 }
             }
@@ -274,11 +349,19 @@ fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
                             usuario?.let {
                                 guardarGPS(it.uid, currentUserLocation!!.latitude, currentUserLocation!!.longitude)
                             }
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Cálculo realizado con éxito")
+                            }
                         } catch (e: Exception) {
                             resultInfo = "Error: ${e.message}"
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Error: ${e.message}")
+                            }
                         }
                     } else {
-                        Toast.makeText(context, "Ingrese un monto válido y active el GPS", Toast.LENGTH_SHORT).show()
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Ingrese un monto válido y active el GPS")
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -305,38 +388,6 @@ fun MainMenuScreen(fusedLocationClient: FusedLocationProviderClient) {
                 )
             }
         }
-    }
-}
-
-fun obtenerUbicacion(
-    context: Context,
-    fusedLocationClient: FusedLocationProviderClient,
-    onLocationReceived: (Location) -> Unit
-) {
-    if (ActivityCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        ) != PackageManager.PERMISSION_GRANTED
-    ) {
-        Toast.makeText(context, "No se ha concedido permiso de ubicación", Toast.LENGTH_SHORT).show()
-        return
-    }
-
-    val cancellationTokenSource = CancellationTokenSource()
-    fusedLocationClient.getCurrentLocation(
-        Priority.PRIORITY_HIGH_ACCURACY,
-        cancellationTokenSource.token
-    ).addOnSuccessListener { location: Location? ->
-        if (location != null) {
-            onLocationReceived(location)
-        } else {
-            Toast.makeText(context, "No se pudo obtener la ubicación. Asegúrese de que el GPS esté encendido.", Toast.LENGTH_SHORT).show()
-        }
-    }.addOnFailureListener { exception ->
-        Toast.makeText(context, "Error: ${exception.message}", Toast.LENGTH_SHORT).show()
     }
 }
 
